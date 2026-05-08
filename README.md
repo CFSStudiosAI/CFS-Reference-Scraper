@@ -1,88 +1,83 @@
 # CFSStudios.AI TT Scraper
 
-Local-first TikTok scraping + review tool for animation reference work. Curate a list of creators, the scraper pulls their uploads into an organized library, and a browser UI lets you triage them with approve / reject / delete / restore states, trim-on-approve, and live search.
+Local-first TikTok scraping + review tool. Curate a list of creators, the scraper pulls their uploads into an organized library, and a browser UI lets you triage them with approve / reject / delete / restore states, trim-on-approve, and live search.
 
-Windows-only. No cloud. No accounts. Everything stays on your machine.
+Windows-only. No cloud, no accounts. Everything stays on your machine.
+
+Repo: <https://github.com/CFSStudiosAI/CFS-Reference-Scraper>
 
 ## Setup
 
-1. Install **Python 3.10+** from <https://www.python.org/downloads/>. Tick "Add Python to PATH" in the installer.
-
-2. Install **ffmpeg** (required for downloading and transcoding):
+1. Install **Python 3.10+** from <https://www.python.org/downloads/> (tick "Add Python to PATH").
+2. Install **ffmpeg**:
    ```powershell
    winget install Gyan.FFmpeg
    ```
-   Close and reopen any open shells so the new PATH takes effect.
-
-3. **Double-click `start.bat`** in this folder.
-
-   On first run it'll:
-   - Create a `.venv` virtual environment.
-   - Install the three Python dependencies (`yt-dlp`, `python-dotenv`, `Flask`).
-   - Force-update `yt-dlp` to the latest (because TikTok rotates internal APIs every few weeks).
-   - Seed `input/tiktok_users.csv` from the example template if you don't have one yet.
-   - Launch the local server at <http://127.0.0.1:5000/> and open it in your browser.
-   - Kick off a background scrape.
-
-   Subsequent runs skip the venv setup and go straight to launching.
-
-## Adding creators
-
-Open the **Edit Creators** button in the top-right. Add `@handle` rows, optionally with a friendly display name. Or edit `input/tiktok_users.csv` directly (`handle,name` per row).
-
-When you save a name change in the UI, all existing files for that creator migrate to the new folder name across `downloads/`, `approved/`, `rejected/`, and `deleted/` — no orphaned folders.
+   Reopen any open shells so the new PATH is picked up.
+3. Double-click **`start.bat`**. First run creates the venv, installs dependencies, force-updates yt-dlp, seeds `input/tiktok_users.csv` from the example template, and launches the browser at <http://127.0.0.1:5000/>.
 
 ## Reviewing
 
-Every tab (Pending / Approved / Rejected / Deleted) shows 10 cards per page, all auto-playing muted+looped.
-
-Click any card or hit a keyboard shortcut to open the lightbox:
+Pages of 10 cards across four tabs (Pending / Approved / Rejected / Deleted), all auto-playing muted+looped. Click a card or use keyboard shortcuts in the lightbox:
 
 | Key | Action |
 |---|---|
-| `A` | Approve (re-encodes if you moved the trim sliders, then moves to `approved/`) |
-| `R` | Reject (moves to `rejected/`) |
-| `→` / `←` | Next / previous card (crosses page boundaries) |
-| `Esc` | Close lightbox |
+| `A` | Approve. If the trim sliders are moved, re-encodes to the selected range first. |
+| `R` | Reject. |
+| `→` / `←` | Next / previous card (crosses page boundaries). |
+| `Esc` | Close lightbox. |
 
-Lightbox extras:
-- **Trim sliders** are always visible. Drag start/end and the video scrubs to that frame so you see exactly where the cut lands. The button text flips to "Approve & Trim" when sliders are moved; on click the file is re-encoded with ffmpeg before being moved to `approved/`.
-- The "CFSStudios.AI" header link opens [cfsstudios.ai](https://www.cfsstudios.ai/) in a new tab.
+The trim sliders are always visible; dragging either scrubs the video so you see exactly which frame you're cutting to. The Approve button label flips to **Approve & Trim** when sliders are moved.
 
 ## Bulk actions
 
-- **Delete Rejected** (button on the Rejected tab) — re-encodes each rejected video down to a single thumbnail JPEG and moves the row to the Deleted state. The original file is gone but the thumbnail (and DB record) stays so you remember you saw it.
-- **Restore** (button on each Deleted card) — re-downloads the original from TikTok and flips the row back to Pending.
-- **Live search** — type in the search box. Filters the current tab by description (TikTok caption) text, debounced live as you type.
+- **Delete Rejected** (button on the Rejected tab) — replaces each rejected video file with a thumbnail JPEG and moves the row to Deleted. The DB record stays so the scraper never re-downloads it.
+- **Restore** (button on each Deleted card) — re-downloads the original from TikTok, flips the row back to Pending.
+- **Live search** — filters the current tab by description (TikTok caption) text, debounced as you type.
+- **Edit Creators** — add, rename, or delete creators. Renaming migrates all existing files for that creator into the new folder name across every status root and removes orphan folders. Deleting offers two modes: keep approved videos, or wipe everything for that creator.
 
-## How it stays organized
+## Layout
 
-| Folder | What lives there |
+| Path | Role |
 |---|---|
-| `downloads/<creator>/` | Newly scraped, awaiting your verdict |
-| `approved/<creator>/` | 👍 — your reference library |
-| `rejected/<creator>/` | 👎 — discarded but retrievable |
-| `deleted/<creator>/` | Just thumbnails (`.jpg`) — video file gone, but never re-downloaded |
-| `library.db` | SQLite — every video's `video_id`, status, file path, metadata |
+| `input/tiktok_users.csv` | Tracked creators (`handle,name`) |
+| `downloads/<creator>/` | Pending — newly scraped, awaiting verdict |
+| `approved/<creator>/` | 👍 reference library |
+| `rejected/<creator>/` | 👎 retrievable discards |
+| `deleted/<creator>/` | Thumbnail JPEGs only — file deleted, never re-downloaded |
+| `library.db` | SQLite — every video keyed by TikTok's permanent `video_id` |
 | `logs/scraper_<date>.log` | Background scraper output |
 
-The DB is keyed by TikTok's permanent `video_id`. **Once a video is in the DB in any state, it never re-downloads** — even after deletion, even if you wipe the DB and run again (the disk-heal logic finds existing files and rebuilds the row from where it lives).
+The DB is keyed by TikTok's `video_id`. **Once a video is in the DB in any state, it never re-downloads** — even after deletion, even if you wipe the DB (the disk-heal logic finds existing files and rebuilds the row from where they live).
 
 ## Tunables (`config.py`)
 
 | Setting | Default | What it does |
 |---|---|---|
-| `VIDEOS_PER_USER` | `0` | Cap on videos pulled per creator per scrape. `0` means "all available." |
-| `MIN_UPLOAD_DATE` | `Jan 1 of current year` | YYYY-MM-DD floor; older uploads are dropped without ever hitting the network (TikTok IDs are snowflake-encoded, so the date comes for free). Set to `None` to disable. |
-| `MAX_RESOLUTION` | `"720"` | yt-dlp picks best available stream up to this height. |
+| `VIDEOS_PER_USER` | `0` | Cap per creator per scrape. `0` = unlimited. |
+| `MIN_UPLOAD_DATE` | `Jan 1 of current year` | YYYY-MM-DD floor. Older uploads are dropped without hitting the network — TikTok video IDs are snowflake-encoded with the upload timestamp. Set to `None` to disable. |
+| `MAX_RESOLUTION` | `"720"` | yt-dlp picks best stream up to this height. |
 | `PAGE_SIZE` | `10` | Cards per page in the UI. |
-| `TIKTOK_COOKIES_FROM_BROWSER` | `None` | Set to `"firefox"`, `"chrome"`, `"edge"`, etc. if TikTok blocks anonymous scraping. yt-dlp will then read your logged-in TikTok cookies from that browser. |
+| `TIKTOK_COOKIES_FROM_BROWSER` | `None` | Set to `"firefox"`, `"chrome"`, `"edge"`, etc. if TikTok blocks anonymous scraping. yt-dlp will then read that browser's logged-in cookies. |
 
-## Maintenance
+## Updating
 
-- **`fix_hevc.bat`** — one-shot scan of `downloads/`, `approved/`, `rejected/`, and `deleted/`; transcodes any HEVC (iPhone-shot) videos to H.264 in place. Idempotent — already-H.264 files are detected and skipped.
-- **TikTok extraction broken?** TikTok rotates their internal API every few weeks. The fix is almost always to update yt-dlp, which `start.bat` already does on every launch. If problems persist, check the GitHub issues at <https://github.com/yt-dlp/yt-dlp/issues>.
-- **All your videos look black or won't play?** Almost always a missing or stale ffmpeg install. Verify with `ffprobe -version` in a fresh shell.
+If you cloned with git:
+
+```powershell
+git pull
+```
+
+inside the project folder. Then run `start.bat` as normal — it auto-handles any new dependencies.
+
+If you downloaded the ZIP, redownload it from the repo and copy `library.db`, `input/tiktok_users.csv`, and the four media folders (`downloads/`, `approved/`, `rejected/`, `deleted/`) into the new copy.
+
+## Troubleshooting
+
+- **TikTok extraction broken** — almost always means yt-dlp needs to update for TikTok's latest internal API change. `start.bat` does this on every launch, so just re-run it. If problems persist, check <https://github.com/yt-dlp/yt-dlp/issues>.
+- **Black thumbnails / videos won't play** — usually missing or stale ffmpeg. Run `ffprobe -version` in a fresh shell to verify.
+- **HEVC iPhone clips not playing** — Chromium browsers on Windows can't decode HEVC natively. Run **`fix_hevc.bat`** once; it scans every media folder and transcodes any HEVC files to H.264 in place. Idempotent and safe to re-run.
+- **TikTok blocking certain creators** — set `TIKTOK_COOKIES_FROM_BROWSER` in `config.py` to your browser name, log into TikTok in that browser.
 
 ## License
 
