@@ -1,0 +1,37 @@
+# Secrets
+.env
+
+# Personal creator list (ship .example template instead)
+input/tiktok_users.csv
+
+# Downloaded media
+downloads/
+approved/
+rejected/
+deleted/
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CFSStudios.AI TT Scraper</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header>
+  <h1><a class="brand-link" href="https://www.cfsstudios.ai/" target="_blank" rel="noopener noreferrer">CFSStudios.AI</a> TT Scraper</h1>
+  <div class="stats">
+    <span id="filtered-count">{{ total_filtered }}</span> {{ current_status }} · {{ total_count }} total · {{ total_bytes | filesize }}
+  </div>
+</header>
+
+<section class="controls">
+  <nav class="status-tabs">
+    {% for s in ['pending', 'approved', 'rejected', 'deleted'] %}
+      {% set qs = url_for('index', user=current_user, status=s, q=current_query or none) %}
+      <a href="{{ qs }}" class="tab {% if current_status == s %}active{% endif %} tab-{{ s }}">
+        {{ s | capitalize }}
+        <span class="tab-count">{{ status_counts.get(s, 0) }}</span>
+      </a>
+    {% endfor %}
+  </nav>
+
+  <form method="get" action="{{ url_for('index') }}" class="filter-form">
+    <input type="hidden" name="status" value="{{ current_status }}">
+    {% if current_query %}<input type="hidden" name="q" value="{{ current_query }}">{% endif %}
+    <select name="user" onchange="this.form.submit()">
+      <option value="">All creators</option>
+      {% for u in users %}
+        <option value="{{ u }}" {% if u == current_user %}selected{% endif %}>{{ display_names.get(u, u) }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <form method="get" action="{{ url_for('index') }}" class="search-form">
+    <input type="hidden" name="status" value="{{ current_status }}">
+    {% if current_user %}<input type="hidden" name="user" value="{{ current_user }}">{% endif %}
+    <input type="search" name="q" value="{{ current_query }}" placeholder="Search descriptions…" class="search-input">
+  </form>
+
+  {% if current_status == 'rejected' and total_filtered > 0 %}
+    <form method="post" action="{{ url_for('delete_rejected') }}" class="delete-rejected-form"
+          onsubmit="return confirm('Delete {{ total_filtered }} rejected video(s)? This removes the video file but keeps a thumbnail in the Deleted tab. They will not be redownloaded.');">
+      <input type="hidden" name="user" value="{{ current_user or '' }}">
+      <button type="submit" class="danger-btn">Delete Rejected ({{ total_filtered }})</button>
+    </form>
+  {% endif %}
+
+  <button class="add-btn" onclick="document.getElementById('edit-modal').showModal()">
+    Edit Creators
+  </button>
+</section>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+    <div class="flash flash-{{ cat }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+<main class="grid">
+  {% for v in videos %}
+    <article class="card status-{{ v.status or 'pending' }}"
+             data-id="{{ v.video_id }}"
+             data-status="{{ v.status or 'pending' }}"
+             data-title="{{ v.title }}">
+      <div class="thumb">
+        {% if v.status == 'deleted' %}
+          <img src="{{ url_for('serve_video', video_id=v.video_id) }}"
+               alt="{{ v.title }}"
+               onclick="openLightbox(this.closest('.card'))">
+        {% else %}
+          <video src="{{ url_for('serve_video', video_id=v.video_id) }}"
+                 muted loop playsinline autoplay preload="auto"
+                 onclick="openLightbox(this.closest('.card'))"></video>
+        {% endif %}
+        <span class="badge badge-{{ v.status or 'pending' }}">
+          {% if v.status == 'approved' %}✓ Approved
+          {% elif v.status == 'rejected' %}✗ Rejected
+          {% elif v.status == 'deleted' %}🗑 Deleted
+          {% else %}Pending{% endif %}
+        </span>
+      </div>
+      <div class="meta">
+        <div class="user">{{ display_names.get(v.source_user, v.source_user) }}</div>
+        <div class="date">{{ v.upload_date or '—' }} · <span class="dur">{{ v.duration_seconds }}s</span></div>
+        <div class="title">{{ v.title }}</div>
+        {% if v.status == 'deleted' %}
+          <button class="btn-restore"
+                  onclick="restoreVideo('{{ v.video_id }}', this.closest('.card'))">
+            ↻ Restore
+          </button>
+        {% endif %}
+      </div>
+    </article>
+  {% else %}
+    <p class="empty">
+      No videos here. Add a creator and run <code>start.bat</code>.
+    </p>
+  {% endfor %}
+</main>
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+  {% if page > 1 %}
+    <a class="page-btn" href="{{ url_for('index', user=current_user, status=current_status, q=current_query or none, page=1) }}">« First</a>
+    <a class="page-btn" href="{{ url_for('index', user=current_user, status=current_status, q=current_query or none, page=page-1) }}">‹ Prev</a>
+  {% else %}
+    <span class="page-btn disabled">« First</span>
+    <span class="page-btn disabled">‹ Prev</span>
+  {% endif %}
+
+  <span class="page-indicator">Page {{ page }} of {{ total_pages }}</span>
+
+  {% if page < total_pages %}
+    <a class="page-btn" href="{{ url_for('index', user=current_user, status=current_status, q=current_query or none, page=page+1) }}">Next ›</a>
+    <a class="page-btn" href="{{ url_for('index', user=current_user, status=current_status, q=current_query or none, page=total_pages) }}">Last »</a>
+  {% else %}
+    <span class="page-btn disabled">Next ›</span>
+    <span class="page-btn disabled">Last »</span>
+  {% endif %}
+</nav>
+{% endif %}
+
+<dialog id="edit-modal">
+  <h2>Edit creators</h2>
+
+  {% if creators %}
+    <ul class="creators-list">
+      {% for c in creators %}
+        {% set s = creator_stats.get(c.handle) %}
+        <li class="creator-row">
+          <div class="creator-row-main">
+            <span class="creator-handle" title="{{ c.handle }}">{{ c.handle }}</span>
+            <form method="post" action="{{ url_for('update_user') }}" class="rename-form">
+              <input type="hidden" name="handle" value="{{ c.handle }}">
+              <input type="text" name="name" value="{{ c.name }}" placeholder="display name (optional)">
+              <button type="submit" class="primary" title="Save name">Save</button>
+            </form>
+            <button type="button" class="danger delete-creator-btn"
+                    data-handle="{{ c.handle }}"
+                    data-display="{{ display_names.get(c.handle, c.handle) }}"
+                    data-total="{{ s.total if s else 0 }}"
+                    data-approved="{{ s.approved if s else 0 }}"
+                    data-rejected="{{ s.rejected if s else 0 }}"
+                    title="Delete this creator">Delete</button>
+          </div>
+          <div class="creator-stats">
+            {% if s and s.total %}
+              {{ s.total }} total · {{ s.approved }} approved
+              {% if s.graded %}({{ s.approval_pct }}%){% endif %}
+              · {{ s.rejected }} rejected · last upload {{ s.days_ago | days_ago }}
+            {% else %}
+              <span class="muted-inline">no videos yet</span>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No creators tracked yet.</p>
+  {% endif %}
+
+  <h3>Add new</h3>
+  <form method="post" action="{{ url_for('add_user') }}" class="add-form">
+    <input type="text" name="handle" placeholder="@username" required>
+    <input type="text" name="name" placeholder="display name (optional)">
+    <button type="submit" class="primary">Add</button>
+  </form>
+
+  <div class="actions">
+    <button type="button" class="cancel"
+            onclick="document.getElementById('edit-modal').close()">Close</button>
+  </div>
+</dialog>
+
+<dialog id="delete-creator-modal">
+  <form method="post" action="{{ url_for('delete_user') }}" id="delete-creator-form">
+    <h2>Delete <span id="dc-handle-display"></span>?</h2>
+    <p id="dc-stats" class="dc-stats-line"></p>
+    <p class="dc-prompt">What should happen to their existing videos?</p>
+    <input type="hidden" name="handle" id="dc-handle-input">
+    <input type="hidden" name="mode" id="dc-mode-input">
+    <div class="dc-actions">
+      <button type="button" class="cancel"
+              onclick="document.getElementById('delete-creator-modal').close()">
+        Cancel
+      </button>
+      <button type="submit" class="primary"
+              onclick="document.getElementById('dc-mode-input').value='keep_approved';">
+        Delete, keep approved
+      </button>
+      <button type="submit" class="danger"
+              onclick="document.getElementById('dc-mode-input').value='purge_all';">
+        Delete everything
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<div id="lightbox" class="lightbox" onclick="if (event.target === this) closeLightbox()">
+  <div class="lb-stage">
+    <button class="lb-close" onclick="closeLightbox()" title="Close (Esc)">×</button>
+    <video id="lb-video" controls playsinline loop></video>
+    <img id="lb-img" alt="" hidden>
+    <div class="lb-info">
+      <div class="lb-title"></div>
+      <div class="lb-actions">
+        <button class="btn-rate up"  id="lb-up"   title="Approve (A)">👍 Approve</button>
+        <button class="btn-rate down" id="lb-down" title="Reject (R)">👎 Reject</button>
+      </div>
+      <div class="lb-deleted-actions" hidden>
+        <button class="btn-restore" id="lb-restore">↻ Restore</button>
+        <p class="lb-deleted-note">The original video file was deleted. Restoring re-downloads it from TikTok and moves it back to Pending.</p>
+      </div>
+
+      <div class="trim-controls">
+        <div class="trim-header">Trim</div>
+        <label>
+          <span class="trim-label">Start: <span id="trim-start-val">0.0</span>s</span>
+          <input type="range" id="trim-start" min="0" max="0" step="0.05" value="0">
+        </label>
+        <label>
+          <span class="trim-label">End: <span id="trim-end-val">0.0</span>s</span>
+          <input type="range" id="trim-end" min="0" max="0" step="0.05" value="0">
+        </label>
+        <div class="trim-note" id="trim-note">Drag the sliders, then click Approve to apply the cut.</div>
+      </div>
+
+      <div class="lb-hint">Esc — close · A — approve · R — reject · ← / → — navigate</div>
+    </div>
+  </div>
+</div>
+
+<script>
+window.PAGE_INFO = {
+  page: {{ page }},
+  totalPages: {{ total_pages }},
+  user:   {{ (current_user  or '')       | tojson }},
+  status: {{ (current_status or 'pending') | tojson }},
+  query:  {{ (current_query or '')       | tojson }}
+};
+
+const lb = document.getElementById('lightbox');
+const lbVideo = document.getElementById('lb-video');
+const lbTitle = lb.querySelector('.lb-title');
+const lbUp = document.getElementById('lb-up');
+const lbDown = document.getElementById('lb-down');
+
+// Shared AJAX swap: fetch the target URL, splice the grid + pagination +
+// header stats + tab counts into the current page, push history. Both
+// page navigation and live search use this. AbortController lets a newer
+// call cancel an older still-in-flight one (matters for fast typers in
+// the search box).
+let activeSwapAbort = null;
+
+async function swapPage(url, opts = {}) {
+  if (activeSwapAbort) activeSwapAbort.abort();
+  activeSwapAbort = new AbortController();
+  const signal = activeSwapAbort.signal;
+
+  try {
+    const resp = await fetch(url, {
+      headers: { 'X-Requested-With': 'fetch' },
+      signal,
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const html = await resp.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    const newGrid = doc.querySelector('main.grid');
+    const oldGrid = document.querySelector('main.grid');
+    if (newGrid && oldGrid) oldGrid.innerHTML = newGrid.innerHTML;
+
+    const newPagination = doc.querySelector('.pagination');
+    const oldPagination = document.querySelector('.pagination');
+    if (newPagination) {
+      if (oldPagination) oldPagination.replaceWith(newPagination);
+      else oldGrid.insertAdjacentElement('afterend', newPagination);
+    } else if (oldPagination) {
+      oldPagination.remove();
+    }
+
+    const newStats = doc.querySelector('header .stats');
+    const oldStats = document.querySelector('header .stats');
+    if (newStats && oldStats) oldStats.innerHTML = newStats.innerHTML;
+    const newTabs = doc.querySelector('.status-tabs');
+    const oldTabs = document.querySelector('.status-tabs');
+    if (newTabs && oldTabs) oldTabs.innerHTML = newTabs.innerHTML;
+
+    if (opts.replace) {
+      history.replaceState({}, '', url);
+    } else {
+      history.pushState({}, '', url);
+    }
+
+    if (opts.openWhich) {
+      const cards = document.querySelectorAll('.card');
+      if (cards.length) {
+        const target = opts.openWhich === 'last' ? cards[cards.length - 1] : cards[0];
+        openLightbox(target);
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;  // superseded by a newer swap
+    console.warn('AJAX swap failed, falling back to full reload:', err);
+    window.location.href = url;
+  }
+}
+
+async function navigateToPage(targetPage, openWhich) {
+  const p = new URLSearchParams();
+  if (window.PAGE_INFO.user) p.set('user', window.PAGE_INFO.user);
+  if (window.PAGE_INFO.status) p.set('status', window.PAGE_INFO.status);
+  if (window.PAGE_INFO.query) p.set('q', window.PAGE_INFO.query);
+  p.set('page', targetPage);
+  window.PAGE_INFO.page = targetPage;
+  await swapPage('/?' + p.toString(), { openWhich });
+}
+
+async function applySearch(query) {
+  const p = new URLSearchParams();
+  if (window.PAGE_INFO.user) p.set('user', window.PAGE_INFO.user);
+  if (window.PAGE_INFO.status) p.set('status', window.PAGE_INFO.status);
+  if (query) p.set('q', query);
+  p.set('page', '1');
+  window.PAGE_INFO.query = query;
+  window.PAGE_INFO.page = 1;
+  // replaceState — don't pollute history with every keystroke
+  await swapPage('/?' + p.toString(), { replace: true });
+}
+
+// Live search: 250ms debounced input → AJAX swap. Enter still works (and
+// flushes any pending debounce immediately).
+const searchInput = document.querySelector('input[type="search"][name="q"]');
+const searchForm  = document.querySelector('.search-form');
+let searchDebounceTimer = null;
+if (searchInput) {
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      applySearch(searchInput.value.trim());
+    }, 250);
+  });
+}
+if (searchForm) {
+  searchForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    clearTimeout(searchDebounceTimer);
+    applySearch(searchInput.value.trim());
+  });
+}
+
+// Browser back/forward should reload the previous URL fresh — simplest
+// behavior, and the lightbox will be closed on the new page.
+window.addEventListener('popstate', () => { window.location.reload(); });
+
+
+const lbImg = document.getElementById('lb-img');
+const lbDeletedActions = document.querySelector('.lb-deleted-actions');
+const lbActions = lb.querySelector('.lb-actions');
+const lbTrim = document.querySelector('.trim-controls');
+
+function openLightbox(card) {
+  const id = card.dataset.id;
+  const status = card.dataset.status;
+  const isDeleted = status === 'deleted';
+  lb.dataset.id = id;
+  lbTitle.textContent = card.dataset.title || '';
+  applyLbStatus(status);
+  resetTrimUI();
+
+  if (isDeleted) {
+    // Show thumbnail image, hide video & rating UI, show Restore action
+    lbVideo.pause();
+    lbVideo.removeAttribute('src');
+    lbVideo.load();
+    lbVideo.hidden = true;
+    lbImg.src = `/video/${id}?t=${Date.now()}`;
+    lbImg.hidden = false;
+    lbActions.hidden = true;
+    if (lbTrim) lbTrim.hidden = true;
+    lbDeletedActions.hidden = false;
+  } else {
+    // Normal video playback
+    lbImg.hidden = true;
+    lbImg.removeAttribute('src');
+    lbVideo.hidden = false;
+    lbActions.hidden = false;
+    if (lbTrim) lbTrim.hidden = false;
+    lbDeletedActions.hidden = true;
+    lbVideo.muted = false;
+    lbVideo.src = `/video/${id}?t=${Date.now()}`;
+  }
+
+  lb.classList.add('active');
+
+  if (!isDeleted) {
+    const playPromise = lbVideo.play();
+    if (playPromise && playPromise.catch) {
+      playPromise.catch(() => {
+        lbVideo.muted = true;
+        lbVideo.play().catch(() => {});
+      });
+    }
+  }
+}
+
+function closeLightbox() {
+  lbVideo.pause();
+  lbVideo.removeAttribute('src');
+  lbVideo.load();
+  lbImg.removeAttribute('src');
+  lb.classList.remove('active');
+  resetTrimUI();
+}
+
+async function restoreVideo(videoId, card) {
+  const btn = card ? card.querySelector('.btn-restore') : null;
+  const lbBtn = document.getElementById('lb-restore');
+  const setBusy = (busy) => {
+    if (btn)   { btn.disabled   = busy; btn.textContent   = busy ? 'Restoring…' : '↻ Restore'; }
+    if (lbBtn) { lbBtn.disabled = busy; lbBtn.textContent = busy ? 'Restoring…' : '↻ Restore'; }
+  };
+  setBusy(true);
+  try {
+    const resp = await fetch(`/restore/${videoId}`, { method: 'POST' });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'restore failed');
+    // Restore moves the row to Pending — easiest is to reload the deleted view
+    window.location.reload();
+  } catch (err) {
+    alert('Restore failed: ' + err.message);
+    setBusy(false);
+  }
+}
+
+document.getElementById('lb-restore').addEventListener('click', () => {
+  const id = lb.dataset.id;
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (card) restoreVideo(id, card);
+});
+
+function applyLbStatus(status) {
+  lbUp.classList.toggle('active', status === 'approved');
+  lbDown.classList.toggle('active', status === 'rejected');
+}
+
+async function rate(videoId, target, card) {
+  const current = card.dataset.status || 'pending';
+  // Toggle: clicking the same target again resets to pending.
+  const newStatus = (current === target) ? 'pending' : target;
+
+  // Capture neighbors NOW, before any DOM mutation — needed so the lightbox
+  // can advance even after we remove the rated card from the grid.
+  const nextCard = nextSiblingCard(card);
+  const prevCard = prevSiblingCard(card);
+
+  // If approving via the lightbox AND the user moved the trim sliders,
+  // re-encode the file first so only the selected range survives. Reject
+  // never trims — it's a discard either way.
+  const isLightbox = lb.classList.contains('active') && lb.dataset.id === videoId;
+  if (isLightbox && newStatus === 'approved') {
+    const ok = await applyTrimIfModified(videoId, card);
+    if (!ok) return;  // trim failed; user already saw the alert
+  }
+
+  // Fully detach any <video> elements pointing at this file so Windows
+  // doesn't see the file as in-use when /rate's set_status() renames it.
+  const cardVideo = card.querySelector('video');
+  unloadVideoElement(cardVideo);
+  if (lb.dataset.id === videoId) {
+    unloadVideoElement(lbVideo);
+  }
+  // Tiny delay so the browser actually closes the HTTP connection before
+  // we hit the server.
+  await new Promise(r => setTimeout(r, 80));
+
+  try {
+    const resp = await fetch(`/rate/${videoId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ status: newStatus }),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'rate failed');
+
+    card.dataset.status = newStatus;
+    if (lb.dataset.id === videoId) applyLbStatus(newStatus);
+
+    // Each tab is a single status, so any rate moves the card out of view.
+    // Pull it out of the grid and adjust counts so things stay accurate.
+    const cardLeftView = newStatus !== window.PAGE_INFO.status;
+    if (cardLeftView) {
+      removeCardAndUpdateCounts(card, current, newStatus);
+    } else {
+      // Stayed (rare — only via toggle paths). Refresh the card visuals.
+      card.classList.remove('status-pending', 'status-approved', 'status-rejected', 'status-deleted');
+      card.classList.add(`status-${newStatus}`);
+      const badge = card.querySelector('.badge');
+      if (badge) {
+        badge.className = `badge badge-${newStatus}`;
+        badge.textContent = newStatus === 'approved' ? '✓ Approved'
+                          : newStatus === 'rejected' ? '✗ Rejected'
+                          : newStatus === 'deleted'  ? '🗑 Deleted'
+                          : 'Pending';
+      }
+      if (cardVideo) cardVideo.src = `/video/${videoId}?t=${Date.now()}`;
+    }
+  } catch (err) {
+    alert('Failed to update: ' + err.message);
+    return;
+  }
+
+  // Lightbox auto-advance using neighbors captured before the DOM mutation.
+  if (lb.classList.contains('active') && lb.dataset.id === videoId) {
+    if (nextCard && nextCard.isConnected) {
+      openLightbox(nextCard);
+    } else if (window.PAGE_INFO.page < window.PAGE_INFO.totalPages) {
+      navigateToPage(window.PAGE_INFO.page + 1, 'first');
+    } else if (prevCard && prevCard.isConnected) {
+      // Hit the end of the very last page — jump back to the previous card
+      openLightbox(prevCard);
+    } else {
+      closeLightbox();
+    }
+  }
+}
+
+function nextSiblingCard(card) {
+  let n = card.nextElementSibling;
+  while (n && !n.classList.contains('card')) n = n.nextElementSibling;
+  return n;
+}
+
+function prevSiblingCard(card) {
+  let n = card.previousElementSibling;
+  while (n && !n.classList.contains('card')) n = n.previousElementSibling;
+  return n;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!lb.classList.contains('active')) return;
+  // Don't hijack typing in inputs
+  if (e.target.matches('input, textarea')) return;
+  const id = lb.dataset.id;
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (e.key === 'Escape') { closeLightbox(); }
+  else if (e.key === 'a' || e.key === 'A') { rate(id, 'approved', card); }
+  else if (e.key === 'r' || e.key === 'R') { rate(id, 'rejected', card); }
+  else if (e.key === 'ArrowRight') {
+    const next = nextSiblingCard(card);
+    if (next) {
+      openLightbox(next);
+    } else if (window.PAGE_INFO.page < window.PAGE_INFO.totalPages) {
+      navigateToPage(window.PAGE_INFO.page + 1, 'first');
+    }
+  }
+  else if (e.key === 'ArrowLeft') {
+    const prev = prevSiblingCard(card);
+    if (prev) {
+      openLightbox(prev);
+    } else if (window.PAGE_INFO.page > 1) {
+      navigateToPage(window.PAGE_INFO.page - 1, 'last');
+    }
+  }
+});
+
+// Wire up lightbox buttons (they were rendered without inline onclick because
+// the video_id is dynamic from `lb.dataset.id`).
+lbUp.addEventListener('click', () => {
+  const id = lb.dataset.id;
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (card) rate(id, 'approved', card);
+});
+lbDown.addEventListener('click', () => {
+  const id = lb.dataset.id;
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (card) rate(id, 'rejected', card);
+});
+
+// --- Trim UI ------------------------------------------------------------
+const trimStart    = document.getElementById('trim-start');
+const trimEnd      = document.getElementById('trim-end');
+const trimStartVal = document.getElementById('trim-start-val');
+const trimEndVal   = document.getElementById('trim-end-val');
+const trimNote     = document.getElementById('trim-note');
+
+function trimIsModified() {
+  const dur = lbVideo.duration || 0;
+  if (!dur) return false;
+  const s = parseFloat(trimStart.value);
+  const e = parseFloat(trimEnd.value);
+  if (e <= s + 0.05) return false;
+  return s > 0.05 || e < dur - 0.05;
+}
+
+function refreshApproveLabel() {
+  const modified = trimIsModified();
+  lbUp.textContent = modified ? '👍 Approve & Trim' : '👍 Approve';
+  trimNote.textContent = modified
+    ? 'On Approve, the file will be re-encoded to keep only the selected range.'
+    : 'Drag the sliders, then Approve to apply the cut. Reject ignores the trim.';
+}
+
+function resetTrimUI() {
+  // Calibrate to current video. Called on open; runs again from the
+  // loadedmetadata listener once the duration is actually known.
+  const dur = lbVideo.duration || 0;
+  trimStart.min = 0;
+  trimStart.max = dur;
+  trimStart.value = 0;
+  trimEnd.min = 0;
+  trimEnd.max = dur;
+  trimEnd.value = dur;
+  trimStartVal.textContent = '0.00';
+  trimEndVal.textContent = dur ? dur.toFixed(2) : '0.00';
+  refreshApproveLabel();
+}
+
+lbVideo.addEventListener('loadedmetadata', () => {
+  resetTrimUI();
+});
+
+trimStart.addEventListener('input', () => {
+  let s = parseFloat(trimStart.value);
+  let e = parseFloat(trimEnd.value);
+  if (s >= e) { s = Math.max(0, e - 0.05); trimStart.value = s; }
+  trimStartVal.textContent = s.toFixed(2);
+  lbVideo.currentTime = s;       // scrub so user sees the start frame
+  lbVideo.pause();
+  refreshApproveLabel();
+});
+
+trimEnd.addEventListener('input', () => {
+  let s = parseFloat(trimStart.value);
+  let e = parseFloat(trimEnd.value);
+  const dur = lbVideo.duration || 0;
+  if (e <= s) { e = Math.min(dur, s + 0.05); trimEnd.value = e; }
+  trimEndVal.textContent = e.toFixed(2);
+  lbVideo.currentTime = e;
+  lbVideo.pause();
+  refreshApproveLabel();
+});
+
+async function applyTrimIfModified(videoId, card) {
+  if (!trimIsModified()) return true;  // nothing to do
+  const s = parseFloat(trimStart.value);
+  const e = parseFloat(trimEnd.value);
+  lbUp.disabled = true;
+  lbUp.textContent = 'Trimming…';
+  try {
+    const resp = await fetch(`/trim/${videoId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ start: s, end: e }),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'trim failed');
+
+    // Update only the displayed duration. Don't reload the card video src
+    // here — that would open a new HTTP connection to the file right when
+    // /rate is about to rename it, which causes a Windows file lock.
+    if (card) {
+      const durEl = card.querySelector('.dur');
+      if (durEl) durEl.textContent = `${data.duration}s`;
+    }
+    return true;
+  } catch (err) {
+    alert('Trim failed: ' + err.message);
+    return false;
+  } finally {
+    lbUp.disabled = false;
+    refreshApproveLabel();
+  }
+}
+
+// Fully detach a <video> from its source URL so the browser closes any
+// open HTTP connection — required before moving the file on Windows.
+function unloadVideoElement(v) {
+  if (!v) return;
+  v.pause();
+  v.removeAttribute('src');
+  try { v.load(); } catch (e) { /* ignore */ }
+}
+
+// After a successful rate, the card no longer belongs in the current
+// status filter. Pull it out of the grid and adjust the counts so the
+// header and tab badges stay accurate without a reload.
+function removeCardAndUpdateCounts(card, oldStatus, newStatus) {
+  card.remove();
+
+  const filteredEl = document.getElementById('filtered-count');
+  if (filteredEl) {
+    const n = parseInt(filteredEl.textContent, 10) || 0;
+    filteredEl.textContent = String(Math.max(0, n - 1));
+  }
+
+  const oldTab = document.querySelector(`.tab-${oldStatus} .tab-count`);
+  if (oldTab) {
+    const n = parseInt(oldTab.textContent, 10) || 0;
+    oldTab.textContent = String(Math.max(0, n - 1));
+  }
+  const newTab = document.querySelector(`.tab-${newStatus} .tab-count`);
+  if (newTab) {
+    const n = parseInt(newTab.textContent, 10) || 0;
+    newTab.textContent = String(n + 1);
+  }
+}
+
+// --- Delete Creator confirmation modal ----------------------------------
+document.querySelectorAll('.delete-creator-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const handle  = btn.dataset.handle;
+    const display = btn.dataset.display || handle;
+    const total    = parseInt(btn.dataset.total    || '0', 10);
+    const approved = parseInt(btn.dataset.approved || '0', 10);
+    const rejected = parseInt(btn.dataset.rejected || '0', 10);
+
+    document.getElementById('dc-handle-display').textContent = display;
+    document.getElementById('dc-handle-input').value = handle;
+    document.getElementById('dc-mode-input').value = '';
+
+    const stats = document.getElementById('dc-stats');
+    if (total > 0) {
+      stats.textContent =
+        `${total} total · ${approved} approved · ${rejected} rejected/deleted`;
+    } else {
+      stats.textContent = 'No videos for this creator yet.';
+    }
+    document.getElementById('delete-creator-modal').showModal();
+  });
+});
+
+// If we arrived from a cross-page lightbox navigation (?open=first|last),
+// auto-open the lightbox on the appropriate card. Then strip the marker
+// so a refresh doesn't re-trigger.
+(function autoOpenFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const open = params.get('open');
+  if (!open) return;
+  const cards = document.querySelectorAll('.card');
+  if (cards.length) {
+    const target = open === 'last' ? cards[cards.length - 1] : cards[0];
+    openLightbox(target);
+  }
+  params.delete('open');
+  const cleanQs = params.toString();
+  history.replaceState({}, '', window.location.pathname + (cleanQs ? '?' + cleanQs : ''));
+})();
+</script>
+
+</body>
+</html>

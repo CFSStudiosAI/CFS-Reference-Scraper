@@ -1,0 +1,37 @@
+CFSStudios.AI TT Scraper — Personal Use License
+
+Copyright (c) 2026 CFSStudios.AI. All rights reserved.
+
+This software is provided to recipients designated by the copyright holder
+for personal, non-commercial use only.
+
+YOU MAY:
+  - Run the software on your own personal computers.
+  - Edit configuration files (config.py and any file under input/) to set
+    your own creator list and preferences.
+  - View the source code.
+
+YOU MAY NOT:
+  - Sell, rent, lease, sublicense, or charge any fee for access to this
+    software, modified or unmodified.
+  - Distribute the software, in whole or in part, to any third party. This
+    includes but is not limited to: public or private repositories, mirrors,
+    file shares, package archives, bundles, screenshots of the source, or
+    derivative software products.
+  - Modify, adapt, translate, port, or create derivative works of the
+    program code (i.e., any .py, .html, .css, .js, or .bat file) beyond
+    editing the configuration files explicitly permitted above.
+  - Remove, alter, or obscure the copyright notice, brand attribution
+    (the "CFSStudios.AI" header link in the UI), or this license.
+  - Use the software for any commercial purpose.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+By using this software you agree to these terms. If you do not agree, do
+not use, copy, install, or run the software.
