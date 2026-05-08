@@ -496,6 +496,11 @@ if __name__ == "__main__":
     print("  Press Ctrl+C to stop the server")
     print("=" * 60)
     print()
+    # Ensure the SQLite schema exists BEFORE Flask starts serving requests.
+    # On a fresh clone, the background scraper might not run init_db() in
+    # time (especially when tiktok_users.csv has only the placeholder row,
+    # which makes the scraper exit early before touching the DB).
+    database.init_db()
     _kick_off_scraper()
     threading.Thread(target=_open_browser_when_ready, daemon=True).start()
     app.run(host="127.0.0.1", port=5000, debug=False)
