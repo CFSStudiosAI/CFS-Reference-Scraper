@@ -47,11 +47,16 @@ CREATE INDEX IF NOT EXISTS idx_videos_status      ON videos(status);
 
 
 def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    """Open (and lazily create) the SQLite database."""
+    """Open (and lazily create) the SQLite database. WAL mode lets the
+    scraper subprocess and the Flask web server hold connections at the
+    same time without "database is locked" errors during concurrent use."""
     path = Path(db_path) if db_path else config.DATABASE_PATH
-    conn = sqlite3.connect(path)
+    # `timeout` kicks in if WAL still can't satisfy a write immediately
+    conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

@@ -62,6 +62,7 @@ def _ydl_base_opts() -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 30,  # don't hang forever if TikTok is slow / blocking
     }
     cookies_browser = getattr(config, "TIKTOK_COOKIES_FROM_BROWSER", None)
     if cookies_browser:

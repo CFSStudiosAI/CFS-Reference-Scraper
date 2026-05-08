@@ -297,6 +297,16 @@ async function swapPage(url, opts = {}) {
       history.pushState({}, '', url);
     }
 
+    // If the lightbox was open on a card that no longer exists in the
+    // new grid (e.g. the user typed in the search box and filtered it
+    // out), close it. Otherwise approve/reject/restore would lookup a
+    // null card and crash.
+    if (lb.classList.contains('active') && lb.dataset.id) {
+      if (!document.querySelector(`.card[data-id="${lb.dataset.id}"]`)) {
+        closeLightbox();
+      }
+    }
+
     if (opts.openWhich) {
       const cards = document.querySelectorAll('.card');
       if (cards.length) {

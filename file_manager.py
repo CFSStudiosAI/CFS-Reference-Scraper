@@ -285,11 +285,28 @@ def purge_creator_videos(handle: str, *, keep_approved: bool) -> dict:
     }
 
 
+def _current_display_name_for(handle: str) -> Optional[str]:
+    """Look up the creator's CURRENT name override from tiktok_users.csv.
+    Used by restore so we don't dump the re-download into a stale folder
+    name from before the creator was renamed."""
+    import csv as _csv
+    if not config.USERS_CSV.exists():
+        return None
+    try:
+        with config.USERS_CSV.open(newline="", encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                if (row.get("handle") or "").strip().lower() == handle.lower():
+                    return (row.get("name") or "").strip() or None
+    except OSError:
+        pass
+    return None
+
+
 def restore_video(video_id: str) -> tuple[bool, str]:
     """Re-download a deleted video. Sets status back to 'pending' and removes
     the thumbnail JPEG. Imports inside the function to avoid a circular
     import with downloader."""
-    from downloader import download_video  # local to avoid circular import
+    from downloader import download_video, sanitize_filename  # local to avoid circular import
 
     conn = database.connect()
     try:
@@ -309,9 +326,15 @@ def restore_video(video_id: str) -> tuple[bool, str]:
         url = f"https://www.tiktok.com/@{handle}/video/{video_id}"
 
         thumb_path = Path(row["file_path"]) if row["file_path"] else None
-        # Folder name to download into: preserve whichever folder was used
-        # before deletion.
-        folder_label = thumb_path.parent.name if thumb_path else handle
+        # Prefer the CURRENT name override from the CSV — falls back to the
+        # thumb's parent folder, then the bare handle.
+        current_name = _current_display_name_for(source_user)
+        if current_name:
+            folder_label = sanitize_filename(current_name)
+        elif thumb_path:
+            folder_label = thumb_path.parent.name
+        else:
+            folder_label = handle
 
     finally:
         conn.close()

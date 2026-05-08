@@ -157,8 +157,11 @@ def index():
         where.append("source_user = ?")
         params.append(user_filter)
     if query:
-        where.append("title LIKE ?")
-        params.append(f"%{query}%")
+        # Escape SQL LIKE wildcards so a search for e.g. "100%" doesn't
+        # match every row. Backslash is the escape char.
+        esc = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where.append("title LIKE ? ESCAPE '\\'")
+        params.append(f"%{esc}%")
     where_sql = " WHERE " + " AND ".join(where)
 
     conn = database.connect()
@@ -470,22 +473,56 @@ def _open_browser_when_ready():
     webbrowser.open("http://127.0.0.1:5000/")
 
 
+def _pid_alive(pid: int) -> bool:
+    """Windows-flavored is-this-PID-running check via tasklist."""
+    if pid <= 0:
+        return False
+    try:
+        r = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return False
+    return str(pid) in (r.stdout or "")
+
+
 def _kick_off_scraper() -> None:
-    """Launch scraper.py as a detached background process. Console output
-    is discarded; the scraper's own file handler writes to logs/scraper_<date>.log
-    so progress is observable there. Refreshing the browser shows new
-    videos as they finish downloading."""
+    """Launch scraper.py as a detached background process. If a previous
+    scraper is still running (e.g. user restarted start.bat without waiting
+    for the last scrape to finish), skip — two scrapers racing on the same
+    DB and download folders is a recipe for half-written files."""
+    config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    pid_file = config.LOGS_DIR / "scraper.pid"
+
+    # Honor an existing pid file only if the process is actually alive
+    if pid_file.exists():
+        try:
+            old_pid = int((pid_file.read_text(encoding="utf-8") or "").strip())
+        except (ValueError, OSError):
+            old_pid = -1
+        if old_pid > 0 and _pid_alive(old_pid):
+            print(f"[startup] scraper already running (pid {old_pid}); not starting another")
+            return
+        # stale pid file — fall through and overwrite
+
     log_path = config.LOGS_DIR / f"scraper_{date.today().isoformat()}.log"
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [sys.executable, "scraper.py"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             cwd=str(config.PROJECT_ROOT),
         )
-        print(f"[startup] background scrape running, log: {log_path}")
     except Exception as e:
         print(f"[startup] could not launch scraper: {e}")
+        return
+
+    try:
+        pid_file.write_text(str(proc.pid), encoding="utf-8")
+    except OSError:
+        pass  # not fatal; we'll just skip the duplicate-prevention next time
+    print(f"[startup] background scrape running (pid {proc.pid}), log: {log_path}")
 
 
 if __name__ == "__main__":

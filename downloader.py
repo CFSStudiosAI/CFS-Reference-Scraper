@@ -307,6 +307,7 @@ def download_video(
         "fragment_retries": 3,
         "cachedir": False,
         "ignoreerrors": False,
+        "socket_timeout": 30,  # bail on a hung TikTok server instead of hanging forever
     }
     cookies_browser = getattr(config, "TIKTOK_COOKIES_FROM_BROWSER", None)
     if cookies_browser:
