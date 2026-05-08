@@ -176,53 +176,6 @@ def trim_to(path: Path, start: float, end: float) -> tuple[bool, str]:
     return True, "ok"
 
 
-def fix_existing_hevc() -> None:
-    """Walk all status folders, transcode any HEVC files, update DB paths
-    if extensions changed. Safe to run repeatedly — already-H.264 files are
-    detected and skipped."""
-    import database  # local to avoid circular import at module load
-    roots = [config.DOWNLOADS_DIR, config.APPROVED_DIR, config.REJECTED_DIR]
-
-    log.info("scanning for HEVC files...")
-    found: list[Path] = []
-    for root in roots:
-        if not root.exists():
-            continue
-        for p in root.rglob("*"):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
-                continue
-            if ".transcoding" in p.name or p.name.endswith(".part"):
-                continue
-            codec = _ffprobe_codec(p)
-            if codec in _BROWSER_INCOMPATIBLE_CODECS:
-                found.append(p)
-
-    log.info("found %d HEVC file(s)", len(found))
-    if not found:
-        return
-
-    conn = database.connect()
-    try:
-        for i, path in enumerate(found, 1):
-            log.info("[%d/%d] transcoding %s", i, len(found), path.name)
-            old_str = str(path)
-            new_path = _transcode_to_h264(path)
-            if not new_path:
-                continue
-            # Path probably unchanged (already .mp4), but update DB just in case
-            if str(new_path) != old_str:
-                conn.execute(
-                    "UPDATE videos SET file_path = ? WHERE file_path = ?",
-                    (str(new_path), old_str),
-                )
-                conn.commit()
-        log.info("done")
-    finally:
-        conn.close()
-
-
 def existing_file_for(folder_label: str, video_id: str) -> Optional[Path]:
     """Look for an already-downloaded file under any of the status roots
     (downloads/, approved/, rejected/, deleted/). The deleted/ folder holds
@@ -346,15 +299,9 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    if len(sys.argv) >= 2 and sys.argv[1] == "--fix-hevc":
-        fix_existing_hevc()
-        sys.exit(0)
-
     if len(sys.argv) < 2:
         raise SystemExit(
-            "Usage:\n"
-            "  python downloader.py <url> [folder_label]    # download one\n"
-            "  python downloader.py --fix-hevc              # transcode all HEVC in library\n"
+            "Usage: python downloader.py <url> [folder_label]"
         )
 
     url = sys.argv[1]

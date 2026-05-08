@@ -72,11 +72,12 @@ inside the project folder. Then run `start.bat` as normal — it auto-handles an
 
 If you downloaded the ZIP, redownload it from the repo and copy `library.db`, `input/tiktok_users.csv`, and the four media folders (`downloads/`, `approved/`, `rejected/`, `deleted/`) into the new copy.
 
+
+
 ## Troubleshooting
 
 - **TikTok extraction broken** — almost always means yt-dlp needs to update for TikTok's latest internal API change. `start.bat` does this on every launch, so just re-run it. If problems persist, check <https://github.com/yt-dlp/yt-dlp/issues>.
-- **Black thumbnails / videos won't play** — usually missing or stale ffmpeg. Run `ffprobe -version` in a fresh shell to verify.
-- **HEVC iPhone clips not playing** — Chromium browsers on Windows can't decode HEVC natively. Run **`fix_hevc.bat`** once; it scans every media folder and transcodes any HEVC files to H.264 in place. Idempotent and safe to re-run.
+- **Black thumbnails / videos won't play** — usually missing or stale ffmpeg. Run `ffprobe -version` in a fresh shell to verify. (HEVC clips from iPhones are auto-transcoded to H.264 at download time, so they should never get to a "won't play" state on their own.)
 - **TikTok blocking certain creators** — set `TIKTOK_COOKIES_FROM_BROWSER` in `config.py` to your browser name, log into TikTok in that browser.
 
 ## License
